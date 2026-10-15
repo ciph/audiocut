@@ -4,9 +4,9 @@ Windows 单文件音频播放器与剪辑工具。打开文件自动播放；切
 
 ## 启动
 
-使用已打包版本时，双击 `dist\AudioCut\AudioCut.exe`，或 `启动轻剪.cmd`。源码仓库不包含 EXE 和 FFmpeg，首次运行源码请按下方“开发与验证”准备环境。也可把一个音频文件拖到窗口或 EXE 上打开。
+使用已打包版本时，双击 `release\AudioCut\AudioCut.exe`，或 `启动轻剪.cmd`（优先启动 release，兼容旧 dist 目录）。源码仓库不包含 EXE 和 FFmpeg，首次运行源码请按下方“开发与验证”准备环境。也可把一个音频文件拖到窗口或 EXE 上打开。
 
-运行需要 `ffmpeg` 和 `ffprobe` 可从 PATH 访问；迁移到其他电脑时需安装 FFmpeg，或把两个程序放在 AudioCut.exe 同级的 `bin` 目录。移动打包版本时请保留整个 `dist\AudioCut` 文件夹，包括 `_internal`。
+运行需要 `ffmpeg` 和 `ffprobe` 可从 PATH 访问；迁移到其他电脑时需安装 FFmpeg，或把两个程序放在 AudioCut.exe 同级的 `bin` 目录。移动打包版本时请保留整个 `release\AudioCut` 文件夹，包括 `_internal`。
 
 ## 操作
 
@@ -40,6 +40,10 @@ Windows 单文件音频播放器与剪辑工具。打开文件自动播放；切
 
 ## 格式与元数据
 
+支持打开标准 NCM 容器中的 MP3 / FLAC 音频，打开后自动播放，裁剪、淡化、试听与普通音频一致。解包在本机进行，不登录账户、不联网下载音乐。保存默认使用原 NCM 所在目录和文件名；“与源音频一致”对应内部 MP3 / FLAC 格式，不导出 NCM，也不会覆盖原 NCM 文件。内部音频解包与标签整理不重新编码；编辑导出仍按下述规则编码。临时解包文件在正常关闭程序时清理。
+
+可读取 NCM 的歌曲名、歌手、专辑及 JPEG / PNG 封面，保存时由 metadata 开关控制保留。可解析但缺失/损坏的可选文字标签不会阻止完整音频播放；密钥、结构或内部音频损坏会报错。不支持其他加密容器或未知 NCM 变体。容器布局参考 [ncm2mp3 格式说明](https://github.com/Johnserf-Seed/ncm2mp3/blob/main/docs/ARCHITECTURE.md)，包括封面预留区与实际封面长度的区别。
+
 支持导出 WAV、MP3、FLAC、M4A、AAC、OGG、Opus、AIFF。“与源一致”表示相同文件格式；编辑后会重新编码，有损格式不会逐字节保留源压缩数据。WAV/AIFF 保留合理的源位深，ALAC 来源保存 M4A 时仍使用 ALAC。声道数保持不变；MP3 不接受多于两个声道，部分编码器不支持的采样率会调整到兼容值。
 
 保留 metadata 时，复制目标格式支持的标题、作者、专辑等标签；MP3、FLAC、M4A、AIFF 可保留 JPEG/PNG 封面。章节会按裁剪区间截断并重新计时，再写入支持章节的目标容器。WAV 不保存封面；当前版本 OGG/Opus 只保留文字标签。AAC 使用 ID3v2，标签是否可见取决于播放器。专有标签不保证跨格式保留。取消勾选时去除源标签、章节和封面，但容器仍可能写入必要的格式/编码器信息。
@@ -55,8 +59,8 @@ python -m venv .\.venv
 .\.venv\Scripts\python.exe -m unittest discover -s tests -v
 ```
 
-`core.py` 处理检查、波形、滤镜和安全导出；`app.py` 负责后台任务及播放状态；`widgets.py` 提供波形和保存窗；`theme.py` 集中管理样式。测试生成临时音频，不修改用户音频。Qt 播放测试静音，通过实际播放器状态与播放时钟验证；听感仍需在本机扬声器或耳机上确认。
+`core.py` 处理检查、波形、滤镜和安全导出；`ncm.py` 处理 NCM 流式解包；`app.py` 负责后台任务及播放状态；`widgets.py` 提供波形和保存窗；`theme.py` 集中管理样式。测试生成临时音频，不修改用户音频。Qt 播放测试静音，通过实际播放器状态与播放时钟验证；听感仍需在本机扬声器或耳机上确认。
 
-打包：先运行 `.\.venv\Scripts\python.exe -m pip install PyInstaller==6.22.3`，再在本目录运行 `.\.venv\Scripts\python.exe -m PyInstaller --noconfirm --distpath dist AudioCut.spec`。打包前关闭该输出目录中的运行实例。
+打包：先运行 `.\.venv\Scripts\python.exe -m pip install PyInstaller==6.22.3`，再在本目录运行 `.\.venv\Scripts\python.exe -m PyInstaller --noconfirm --distpath release AudioCut.spec`。打包前关闭该输出目录中的运行实例。
 
 生成的打包目录、缓存、测试日志、截图和音频文件均不提交到源码仓库。验证方法与已知限制见 [VERIFICATION.md](VERIFICATION.md)。

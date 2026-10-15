@@ -1,5 +1,9 @@
 @echo off
 setlocal
+if exist "%~dp0release\AudioCut\AudioCut.exe" (
+  start "" "%~dp0release\AudioCut\AudioCut.exe" %*
+  exit /b 0
+)
 if exist "%~dp0dist\AudioCut\AudioCut.exe" (
   start "" "%~dp0dist\AudioCut\AudioCut.exe" %*
   exit /b 0

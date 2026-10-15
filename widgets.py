@@ -216,7 +216,7 @@ class Waveform(QWidget):
         painter.setFont(QFont("Microsoft YaHei UI", 9))
         painter.setPen(QColor(COLORS["muted"]))
         painter.drawText(QRectF(0, center.y() + 38, self.width(), 24), Qt.AlignmentFlag.AlignCenter,
-                         "WAV · MP3 · FLAC · M4A · AAC · OGG · OPUS · AIFF")
+                         "NCM · WAV · MP3 · FLAC · M4A · AAC · OGG · OPUS · AIFF")
 
     def _fade_paths(self):
         if not self.editing or self.edit is None:
@@ -438,7 +438,7 @@ class SaveDialog(QDialog):
         layout.addWidget(subtitle)
         layout.addSpacing(12)
 
-        self.name_edit = QLineEdit(Path(info.path).stem + "_edit")
+        self.name_edit = QLineEdit(info.original_path.stem + "_edit")
         self.name_edit.setObjectName("fileNameEdit")
         self.name_edit.setPlaceholderText("文件名，不含扩展名")
         self.name_edit.setMaxLength(240)
@@ -449,7 +449,8 @@ class SaveDialog(QDialog):
         source = normalize_format(Path(info.path).suffix)
         if source in FORMATS:
             extension = Path(info.path).suffix.lower()
-            self.format_combo.addItem(f"与源一致 ({extension})", source)
+            label = "与源音频一致" if info.source_path else "与源一致"
+            self.format_combo.addItem(f"{label} ({extension})", source)
             self.format_combo.setItemData(0, extension, Qt.ItemDataRole.UserRole + 1)
         for key, label in FORMATS.items():
             if key != source:
@@ -458,7 +459,7 @@ class SaveDialog(QDialog):
             self.format_combo.setCurrentIndex(max(0, self.format_combo.findData("wav")))
         self._add_field(layout, "文件格式", self.format_combo)
 
-        self.directory_edit = QLineEdit(str(Path(info.path).parent))
+        self.directory_edit = QLineEdit(str(info.original_path.parent))
         self.directory_edit.setObjectName("directoryEdit")
         directory_row = QHBoxLayout()
         directory_row.setSpacing(8)

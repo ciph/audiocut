@@ -9,12 +9,26 @@ import time
 import uuid
 import wave
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
 root = Path(__file__).resolve().parents[1]
-executable = Path(sys.argv[1]).resolve() if len(sys.argv) > 1 else root / "dist" / "AudioCut" / "AudioCut.exe"
+executable = Path(sys.argv[1]).resolve() if len(sys.argv) > 1 else root / "release" / "AudioCut" / "AudioCut.exe"
 fixture = root / "tests" / ("package-silence-" + uuid.uuid4().hex + ".wav")
 with wave.open(str(fixture), "wb") as audio:
     audio.setparams((1, 2, 48000, 0, "NONE", "not compressed"))
     audio.writeframes(bytes(48000 * 2 * 2))
+if "--ncm" in sys.argv[2:]:
+    from core import _run, resolve_tool
+    from ncm_fixture import make_ncm
+    flac = fixture.with_suffix(".flac")
+    try:
+        _run([resolve_tool("ffmpeg"), "-v", "error", "-i", str(fixture), str(flac)])
+        ncm = fixture.with_suffix(".ncm")
+        ncm.write_bytes(make_ncm(flac.read_bytes(), {"musicName": "Package NCM test"}))
+    finally:
+        fixture.unlink(missing_ok=True)
+        flac.unlink(missing_ok=True)
+    fixture = ncm
 startup = subprocess.STARTUPINFO()
 startup.dwFlags |= subprocess.STARTF_USESHOWWINDOW
 startup.wShowWindow = 0
@@ -62,7 +76,7 @@ try:
             if "exception" in title:
                 user32.EnumChildWindows(hwnd, read_child, 0)
         raise RuntimeError(f"EXE failed to load audio: {owned}; details={details}")
-    print("Packaged EXE created a native window and loaded the command-line WAV.")
+    print(f"Packaged EXE created a native window and loaded the command-line {fixture.suffix}.")
     # The title appears before loading finishes; a busy window ignores close.
     deadline = time.monotonic() + 20
     while process.poll() is None and time.monotonic() < deadline:

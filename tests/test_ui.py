@@ -23,6 +23,7 @@ from app import MainWindow
 from core import CURVES, Edit, gain_at, probe, resolve_tool
 from theme import apply_theme
 from widgets import SaveDialog, fade_path
+from ncm_fixture import make_ncm
 
 
 class WindowTest(unittest.TestCase):
@@ -71,6 +72,36 @@ class WindowTest(unittest.TestCase):
         self.wait_for(lambda: self.window.info is not None and not self.window.busy)
         self.wait_for(lambda: self.window.player.playbackState() == QMediaPlayer.PlaybackState.PlayingState)
         self.wait_for(lambda: self.window.player.position() > 80)
+
+    def test_ncm_autoplay_save_directory_and_cache_cleanup(self):
+        flac = self.root / "ncm-source.flac"
+        subprocess.run([resolve_tool("ffmpeg"), "-v", "error", "-y", "-i", str(self.source), str(flac)], check=True)
+        source = self.root / "云音乐测试.ncm"
+        source.write_bytes(make_ncm(flac.read_bytes(), {"musicName": "NCM title"}))
+        self.window.open_path(source)
+        self.wait_for(lambda: self.window.info is not None and not self.window.busy)
+        self.wait_for(lambda: self.window.player.position() > 80)
+        self.assertEqual(self.window.player.playbackState(), QMediaPlayer.PlaybackState.PlayingState)
+        self.assertIn(source.name, self.window.windowTitle())
+        self.assertEqual(self.window.last_directory, str(source.parent))
+        dialog = SaveDialog(self.window.info, self.window)
+        destination, fmt, keep = dialog.result_options()
+        self.assertEqual(destination, source.with_name(source.stem + "_edit.flac"))
+        self.assertEqual(fmt, "flac")
+        self.window.player.pause()
+        self.window.mode_button.click()
+        self.window.select_range(1, 4)
+        self.window.change_fade("in", 0.5)
+        self.window.toggle_play()
+        self.wait_for(lambda: self.window.using_preview and not self.window.busy)
+        self.window.begin_export(destination, fmt, keep)
+        self.wait_for(lambda: not self.window.busy)
+        self.assertAlmostEqual(probe(destination).duration, 3, places=3)
+        self.assertEqual(probe(destination).tags.get("title"), "NCM title")
+        self.wait_for(lambda: self.window.jobs == 0)
+        cache = self.window.temp_dir
+        self.window.close()
+        self.assertFalse(cache.exists())
 
     def test_complete_play_edit_preview_save_flow(self):
         digest = hashlib.sha256(self.source.read_bytes()).digest()

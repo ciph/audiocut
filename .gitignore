@@ -11,6 +11,7 @@ venv/
 /tests/audio-cut-test-*/
 *.wav
 *.mp3
+*.ncm
 *.flac
 *.m4a
 *.aac

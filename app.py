@@ -19,7 +19,7 @@ from PySide6.QtWidgets import (
     QPushButton, QScrollArea, QSlider, QVBoxLayout, QWidget,
 )
 
-from core import CURVES, Edit, export_audio, probe, render_preview, waveform
+from core import CURVES, Edit, export_audio, open_audio, probe, render_preview, waveform
 from theme import apply_theme, icon
 from widgets import SaveDialog, Waveform, time_text
 
@@ -226,7 +226,7 @@ class MainWindow(QMainWindow):
             return
         path, _ = QFileDialog.getOpenFileName(
             self, "打开音频", self.last_directory,
-            "音频文件 (*.wav *.wave *.mp3 *.flac *.m4a *.aac *.ogg *.oga *.opus *.aif *.aiff);;所有文件 (*)",
+            "音频文件 (*.ncm *.wav *.wave *.mp3 *.flac *.m4a *.aac *.ogg *.oga *.opus *.aif *.aiff);;所有文件 (*)",
         )
         if path:
             self.open_path(Path(path))
@@ -241,7 +241,7 @@ class MainWindow(QMainWindow):
         self.source_id += 1
         self.pending_open_autoplay = True
         self.set_busy(True, "正在读取音频…")
-        self.run_job("open", probe, Path(path))
+        self.run_job("open", open_audio, Path(path), self.temp_dir)
 
     def run_job(self, kind, function, *args):
         token = self.source_id
@@ -305,14 +305,14 @@ class MainWindow(QMainWindow):
         self.saved_edit = self.edit
         self.revision += 1
         self.preview_key = None
-        self.last_directory = str(info.path.parent)
-        self.filename.setToolTip(info.path.name)
+        self.last_directory = str(info.original_path.parent)
+        self.filename.setToolTip(info.original_path.name)
         self.filename.setText(self.filename.fontMetrics().elidedText(
-            info.path.name, Qt.TextElideMode.ElideMiddle, self.width() - 270))
+            info.original_path.name, Qt.TextElideMode.ElideMiddle, self.width() - 270))
         channels = {1: "单声道", 2: "立体声"}.get(info.channels, f"{info.channels} 声道")
         depth = f"  ·  {info.bit_depth} bit" if info.bit_depth else ""
-        self.file_detail.setText(f"{info.path.suffix[1:].upper()}  ·  {info.sample_rate / 1000:g} kHz  ·  {channels}{depth}")
-        self.setWindowTitle(info.path.name + " — 轻剪 AudioCut")
+        self.file_detail.setText(f"{info.original_path.suffix[1:].upper()}  ·  {info.sample_rate / 1000:g} kHz  ·  {channels}{depth}")
+        self.setWindowTitle(info.original_path.name + " — 轻剪 AudioCut")
         self.editing = False
         self.sync_fields()
         self.wave.set_audio(info, [])
@@ -528,7 +528,7 @@ class MainWindow(QMainWindow):
         super().resizeEvent(event)
         if self.info:
             self.filename.setText(self.filename.fontMetrics().elidedText(
-                self.info.path.name, Qt.TextElideMode.ElideMiddle, self.width() - 270))
+                self.info.original_path.name, Qt.TextElideMode.ElideMiddle, self.width() - 270))
 
     def closeEvent(self, event: QCloseEvent):
         if self.closed:
@@ -552,7 +552,7 @@ class MainWindow(QMainWindow):
         self.player.setSource(QUrl())
         self.timer.stop()
         self.executor.shutdown(wait=False)
-        for path in self.temp_dir.glob("preview-*.wav"):
+        for path in list(self.temp_dir.glob("preview-*.wav")) + list(self.temp_dir.glob("ncm-*")):
             path.unlink(missing_ok=True)
         self.temp_dir.rmdir()
         self.closed = True

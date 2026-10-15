@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from concurrent.futures import CancelledError
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 import json
 import math
 import os
@@ -45,6 +45,11 @@ class AudioInfo:
     codec: str
     bit_depth: int
     tags: dict
+    source_path: Path | None = None
+
+    @property
+    def original_path(self) -> Path:
+        return self.source_path or self.path
 
 
 @dataclass(frozen=True)
@@ -135,6 +140,38 @@ def probe(path: str | Path) -> AudioInfo:
     tags = dict(data.get("format", {}).get("tags", {}))
     tags.update(audio.get("tags", {}))
     return AudioInfo(path, duration, rate, channels, audio.get("codec_name", "unknown"), depth, tags)
+
+
+def open_audio(path: str | Path, temporary_directory: Path) -> AudioInfo:
+    path = Path(path).expanduser().resolve()
+    if path.suffix.lower() != ".ncm":
+        return probe(path)
+    from ncm import decode_ncm
+
+    audio, tags, cover = decode_ncm(path, temporary_directory)
+    remuxed = audio.with_name(audio.stem + "-tagged" + audio.suffix)
+    try:
+        info = probe(audio)
+        if tags or cover:
+            args = [resolve_tool("ffmpeg"), "-v", "error", "-nostdin", "-y", "-i", str(audio)]
+            if cover:
+                args += ["-i", str(cover)]
+            args += ["-map", "0:a:0", "-map", "1:v:0" if cover else "0:v?", "-c", "copy", "-map_metadata", "0"]
+            if cover:
+                args += ["-disposition:v:0", "attached_pic"]
+            for key, value in tags.items():
+                args += ["-metadata", f"{key}={value}"]
+            _run([*args, str(remuxed)], timeout=max(300, min(7200, info.duration)))
+            info = probe(remuxed)
+            audio.unlink()
+        return replace(info, source_path=path)
+    except BaseException:
+        audio.unlink(missing_ok=True)
+        remuxed.unlink(missing_ok=True)
+        raise
+    finally:
+        if cover:
+            cover.unlink(missing_ok=True)
 
 
 def gain_at(progress: float, curve: str) -> float:
@@ -320,6 +357,8 @@ def export_audio(info: AudioInfo, edit: Edit, destination: str | Path, format_ke
         raise ValueError("源格式不支持导出，请选择 WAV、MP3、FLAC 等格式。")
     encoding = _encoding(info, fmt)
     destination = Path(destination).expanduser().absolute()
+    if info.source_path is not None and destination.resolve() == info.original_path.resolve():
+        raise ValueError("不能覆盖原 NCM 文件，请保存为 MP3、FLAC 等音频格式。")
     if not destination.parent.is_dir():
         raise ValueError("保存文件夹不存在。")
     if destination.exists() and not overwrite:
