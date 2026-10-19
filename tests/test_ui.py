@@ -14,14 +14,14 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from PySide6.QtCore import QPoint, QPointF, QRectF, Qt
-from PySide6.QtGui import QContextMenuEvent, QFontDatabase, QPainterPathStroker
+from PySide6.QtGui import QContextMenuEvent, QFontDatabase, QPainterPathStroker, QPalette
 from PySide6.QtMultimedia import QMediaPlayer
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QMessageBox
 
 from app import MainWindow
 from core import CURVES, Edit, gain_at, probe, resolve_tool
-from theme import apply_theme
+from theme import COLORS, DARK_COLORS, LIGHT_COLORS, apply_theme
 from widgets import SaveDialog, fade_path
 from ncm_fixture import make_ncm
 
@@ -151,6 +151,164 @@ class WindowTest(unittest.TestCase):
         self.assertEqual(output.tags.get("title"), "UI test title")
         self.assertEqual(hashlib.sha256(self.source.read_bytes()).digest(), digest)
         self.assertIn("已保存", self.window.status.text())
+
+    def test_compatible_playback_complete_flow(self):
+        if not self.compatible_backend("test_compatible_playback_complete_flow"):
+            return
+        self.test_complete_play_edit_preview_save_flow()
+        self.assertIn("兼容播放", self.window.windowTitle())
+        self.assertEqual(self.window.info.path, self.source.resolve())
+        cached = Path(self.window.player.source().toLocalFile())
+        self.assertNotEqual(cached, self.source)
+        fmt = self.window.audio.device().preferredFormat()
+        self.assertEqual(probe(cached).sample_rate, fmt.sampleRate())
+        self.assertEqual(probe(cached).channels, fmt.channelCount())
+        count = len(self.window.playback_cache)
+        self.window.restore_source()
+        self.assertFalse(self.window.busy)
+        self.assertEqual(len(self.window.playback_cache), count)
+        self.wait_for(lambda: self.window.jobs == 0)
+        cache_directory = self.window.temp_dir
+        self.window.close()
+        self.assertFalse(cache_directory.exists())
+
+    def test_theme_switch_preserves_playback_and_edit(self):
+        self.assertTrue(self.window.theme_button.isEnabled())
+        self.load()
+        self.window.set_editing(True)
+        self.window.update_edit(Edit(1, 6, 0.6, 0.8))
+        self.window.toggle_play()
+        self.wait_for(lambda: not self.window.busy and self.window.using_preview)
+        self.wait_for(lambda: self.window.player.position() > 80)
+        edit, source = self.window.edit, self.window.player.source()
+        volume = self.window.audio.volume()
+        geometry = self.window.wave.geometry()
+        evidence = Path(__file__).resolve().parents[1] / "evidence"
+        evidence.mkdir(exist_ok=True)
+        try:
+            for dark, colors in ((True, DARK_COLORS), (False, LIGHT_COLORS)):
+                position = self.window.player.position()
+                self.window.theme_button.click()
+                QTest.qWait(60)
+                self.assertEqual(self.qt.property("dark_theme"), dark)
+                self.assertEqual(COLORS, colors)
+                self.assertEqual(self.window.theme_button.isChecked(), dark)
+                self.assertEqual(self.window.theme_button.accessibleName(), "切换到浅色主题" if dark else "切换到深色主题")
+                self.assertEqual(self.window.player.source(), source)
+                self.assertEqual(self.window.player.playbackState(), QMediaPlayer.PlaybackState.PlayingState)
+                self.assertGreaterEqual(self.window.player.position(), position)
+                self.assertEqual(self.window.edit, edit)
+                self.assertTrue(self.window.editing)
+                self.assertEqual(self.window.audio.volume(), volume)
+                self.assertEqual(self.window.wave.geometry(), geometry)
+                self.assertEqual(self.window.play_button.height(), 50)
+                self.assertEqual(self.window.theme_button.height(), 40)
+                self.assertNotIn("@", self.qt.styleSheet())
+                name = "dark" if dark else "light"
+                self.window.grab().save(str(evidence / f"theme-{name}.png"))
+                dialog = SaveDialog(self.window.info, self.window)
+                dialog.show()
+                QTest.qWait(30)
+                self.assertEqual(dialog.palette().color(QPalette.ColorRole.Window).name().upper(), colors["background"])
+                self.assertEqual(dialog.name_edit.palette().color(QPalette.ColorRole.Base).name().upper(), colors["surface"])
+                dialog.grab().save(str(evidence / f"theme-{name}-save.png"))
+                dialog.close()
+                menu = self.window.wave.show_curve_menu("in", self.window.wave.mapToGlobal(QPoint(160, 70)))
+                QTest.qWait(30)
+                self.assertEqual(menu.palette().color(QPalette.ColorRole.Window).name().upper(), colors["surface"])
+                menu.grab().save(str(evidence / f"theme-{name}-curves.png"))
+                menu.close()
+        finally:
+            apply_theme(self.qt)
+            self.window.refresh_theme_icons()
+
+    def test_frameless_window_controls_drag_and_resize(self):
+        window = self.window
+        self.assertTrue(window.windowFlags() & Qt.WindowType.FramelessWindowHint)
+        handle = window.windowHandle()
+        with patch.object(handle, "startSystemMove", return_value=True) as move, \
+                patch.object(handle, "startSystemResize", return_value=True) as resize:
+            QTest.mouseClick(window.header, Qt.MouseButton.LeftButton, pos=QPoint(80, 40))
+            move.assert_called_once()
+            move.reset_mock()
+            for point, edges in (
+                (QPoint(1, 1), Qt.Edge.TopEdge | Qt.Edge.LeftEdge),
+                (QPoint(window.width() - 2, 1), Qt.Edge.TopEdge | Qt.Edge.RightEdge),
+                (QPoint(1, window.height() - 2), Qt.Edge.BottomEdge | Qt.Edge.LeftEdge),
+                (QPoint(window.width() - 2, window.height() - 2), Qt.Edge.BottomEdge | Qt.Edge.RightEdge),
+                (QPoint(1, 100), Qt.Edge.LeftEdge),
+                (QPoint(window.width() - 2, 100), Qt.Edge.RightEdge),
+                (QPoint(100, 1), Qt.Edge.TopEdge),
+                (QPoint(100, window.height() - 2), Qt.Edge.BottomEdge),
+            ):
+                QTest.mouseClick(window, Qt.MouseButton.LeftButton, pos=point)
+                resize.assert_called_with(edges)
+            QTest.mouseClick(window.maximize_button, Qt.MouseButton.LeftButton)
+            QTest.qWait(30)
+            self.assertTrue(window.isMaximized())
+            self.assertEqual(window.maximize_button.accessibleName(), "还原窗口")
+            move.assert_not_called()
+            resize.reset_mock()
+            QTest.mouseClick(window, Qt.MouseButton.LeftButton, pos=QPoint(1, 100))
+            resize.assert_not_called()
+            QTest.mouseDClick(window.header, Qt.MouseButton.LeftButton, pos=QPoint(80, 40))
+            QTest.qWait(30)
+            self.assertFalse(window.isMaximized())
+            window.minimize_button.click()
+            self.assertTrue(window.isMinimized())
+            window.showNormal()
+            window.resize(800, 530)
+            QTest.qWait(30)
+            before = window.header.geometry()
+            window.centralWidget().verticalScrollBar().setValue(10000)
+            QTest.qWait(20)
+            self.assertEqual(window.header.geometry(), before)
+            self.assertTrue(window.close_button.isVisible())
+            self.assertGreater(window.open_button.width(), 80)
+
+    def test_frameless_close_button_keeps_unsaved_edit_guard(self):
+        self.load()
+        self.wait_for(lambda: self.window.jobs == 0)
+        self.window.update_edit(Edit(1, 4))
+        with patch.object(QMessageBox, "question", return_value=QMessageBox.StandardButton.Cancel) as question:
+            self.window.close_button.click()
+            question.assert_called_once()
+            self.assertTrue(self.window.isVisible())
+            self.assertFalse(self.window.closed)
+        with patch.object(QMessageBox, "question", return_value=QMessageBox.StandardButton.Discard):
+            self.window.close_button.click()
+        self.assertTrue(self.window.closed)
+
+    def test_compatible_ncm_playback_and_cleanup(self):
+        if not self.compatible_backend("test_compatible_ncm_playback_and_cleanup"):
+            return
+        self.test_ncm_autoplay_save_directory_and_cache_cleanup()
+
+    def test_compatible_conversion_failure_can_retry(self):
+        if not self.compatible_backend("test_compatible_conversion_failure_can_retry"):
+            return
+        with patch("app.render_playback", side_effect=RuntimeError("conversion failed")), patch.object(QMessageBox, "warning") as warning:
+            self.window.open_path(self.source)
+            self.wait_for(lambda: warning.called and not self.window.busy)
+        self.assertIsNotNone(self.window.pending_playback)
+        self.assertEqual(self.window.player.playbackState(), QMediaPlayer.PlaybackState.StoppedState)
+        self.window.toggle_play()
+        self.wait_for(lambda: not self.window.busy and self.window.player.position() > 80)
+        self.assertIsNone(self.window.pending_playback)
+
+    def compatible_backend(self, test_name):
+        # Qt chooses its backend once per process; isolate the native mode tests.
+        if sys.platform == "win32" and os.environ.get("QT_MEDIA_BACKEND") != "windows":
+            environment = os.environ.copy()
+            environment["QT_MEDIA_BACKEND"] = "windows"
+            result = subprocess.run([sys.executable, "-m", "unittest", "discover", "-s", "tests",
+                                     "-p", "test_ui.py", "-k", test_name, "-v"],
+                                    cwd=Path(__file__).resolve().parents[1], env=environment,
+                                    capture_output=True, timeout=120)
+            self.assertEqual(result.returncode, 0, result.stderr.decode("utf-8", errors="replace"))
+            return False
+        self.window.compatible_audio = True
+        return True
 
     def test_empty_error_and_reset(self):
         self.assertFalse(self.window.play_button.isEnabled())

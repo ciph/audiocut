@@ -157,7 +157,7 @@ class Waveform(QWidget):
             painter.setBrush(QColor(COLORS["accent_soft"]))
             painter.drawRect(QRectF(self._x(start), plot.top(), self._x(end) - self._x(start), plot.height()))
 
-        painter.setPen(QPen(QColor("#EEF0F5"), 1))
+        painter.setPen(QPen(QColor(COLORS["grid"]), 1))
         painter.drawLine(QPointF(plot.left(), center), QPointF(plot.right(), center))
         count = max(1, int(plot.width() / 3))
         for column in range(count):
@@ -168,7 +168,7 @@ class Waveform(QWidget):
             x = plot.left() + (column + 0.5) * plot.width() / count
             seconds = (column + 0.5) * self._duration() / count
             outside = self.editing and not start <= seconds <= end
-            color = "#CDD3DF" if outside else COLORS["accent"]
+            color = COLORS["wave_outside"] if outside else COLORS["accent"]
             painter.setPen(QPen(QColor(color), 1.7, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
             amplitude = max(1.0, value * height)
             painter.drawLine(QPointF(x, center - amplitude), QPointF(x, center + amplitude))
@@ -503,7 +503,7 @@ class SaveDialog(QDialog):
         buttons.addWidget(cancel)
         self.save_button = QPushButton("保存音频")
         self.save_button.setObjectName("saveButton")
-        self.save_button.setIcon(icon("save", "#FFFFFF", 17))
+        self.save_button.setIcon(icon("save", COLORS["on_accent"], 17))
         self.save_button.setDefault(True)
         self.save_button.clicked.connect(self.accept)
         buttons.addWidget(self.save_button)

@@ -34,7 +34,8 @@ startup.dwFlags |= subprocess.STARTF_USESHOWWINDOW
 startup.wShowWindow = 0
 env = os.environ.copy()
 env.pop("QT_QPA_PLATFORM", None)
-process = subprocess.Popen([str(executable), str(fixture)],
+options = ["--compatible-audio"] if "--compatible-audio" in sys.argv[2:] else []
+process = subprocess.Popen([str(executable), *options, str(fixture)],
                            startupinfo=startup, creationflags=subprocess.CREATE_NO_WINDOW, env=env)
 user32 = ctypes.windll.user32
 callback_type = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)

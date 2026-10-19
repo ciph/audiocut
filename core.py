@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from concurrent.futures import CancelledError
 from dataclasses import dataclass, replace
+from functools import lru_cache
 import json
 import math
 import os
@@ -82,6 +83,7 @@ def normalize_format(value: str) -> str:
     return {"wave": "wav", "aif": "aiff", "aifc": "aiff", "oga": "ogg"}.get(value, value)
 
 
+@lru_cache(maxsize=2)
 def resolve_tool(name: str) -> str:
     # Packaged copies take precedence, so installing the app does not change PATH.
     suffix = ".exe" if os.name == "nt" else ""
@@ -434,3 +436,24 @@ def export_audio(info: AudioInfo, edit: Edit, destination: str | Path, format_ke
 
 def render_preview(info: AudioInfo, edit: Edit, destination: str | Path) -> Path:
     return export_audio(info, edit, destination, "wav", keep_metadata=False, overwrite=True)
+
+
+def render_playback(path: Path, destination: Path, sample_rate: int, channels: int, codec: str) -> Path:
+    """Prepare device-matched PCM for listening only; keep export sources intact."""
+    if not 8000 <= sample_rate <= 768000 or not 1 <= channels <= 32 or codec not in {
+        "pcm_u8", "pcm_s16le", "pcm_s32le", "pcm_f32le",
+    }:
+        raise ValueError("输出设备的音频格式不受支持。")
+    info = probe(path)
+    with destination.open("xb"):
+        pass
+    try:
+        _run([resolve_tool("ffmpeg"), "-v", "error", "-nostdin", "-y", "-i", str(path),
+              "-map", "0:a:0", "-vn", "-map_metadata", "-1", "-map_chapters", "-1",
+              "-ar", str(sample_rate), "-ac", str(channels), "-c:a", codec,
+              "-rf64", "auto", "-f", "wav", str(destination)],
+             timeout=max(300, min(7200, info.duration * 10)))
+        return destination
+    except BaseException:
+        destination.unlink(missing_ok=True)
+        raise

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import queue
 import sys
 import tempfile
@@ -10,23 +11,27 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 from pathlib import Path
 
-from PySide6.QtCore import QSize, Qt, QTimer, QUrl
+from PySide6.QtCore import QEvent, QSize, Qt, QTimer, QUrl
 from PySide6.QtGui import QCloseEvent, QFont, QKeySequence, QShortcut
-from PySide6.QtMultimedia import QAudioOutput, QMediaPlayer
+from PySide6.QtMultimedia import QAudioFormat, QAudioOutput, QMediaPlayer
 from PySide6.QtWidgets import (
     QApplication, QComboBox, QFileDialog, QFrame,
     QHBoxLayout, QLabel, QMainWindow, QMessageBox, QProgressBar,
     QPushButton, QScrollArea, QSlider, QVBoxLayout, QWidget,
 )
 
-from core import CURVES, Edit, export_audio, open_audio, probe, render_preview, waveform
-from theme import apply_theme, icon
+from core import CURVES, Edit, export_audio, open_audio, probe, render_playback, render_preview, waveform
+from theme import COLORS, apply_theme, icon
 from widgets import SaveDialog, Waveform, time_text
 
 
 class MainWindow(QMainWindow):
-    def __init__(self):
+    def __init__(self, compatible_audio=False):
         super().__init__()
+        self.setWindowFlag(Qt.WindowType.FramelessWindowHint)
+        self.compatible_audio = compatible_audio
+        self.playback_cache = {}
+        self.pending_playback = None
         self.setWindowTitle("轻剪 AudioCut")
         self.setWindowIcon(icon("music"))
         self.resize(980, 590)
@@ -60,6 +65,7 @@ class MainWindow(QMainWindow):
         self.player.mediaStatusChanged.connect(self.media_status_changed)
         self.player.errorOccurred.connect(self.playback_error)
         self._build_ui()
+        self.refresh_theme_icons()
         self.timer = QTimer(self)
         self.timer.timeout.connect(self.drain_events)
         self.timer.start(40)
@@ -83,22 +89,46 @@ class MainWindow(QMainWindow):
         scroll.setWidget(body)
         self.setCentralWidget(scroll)
         layout = QVBoxLayout(body)
-        layout.setContentsMargins(32, 24, 32, 20)
+        layout.setContentsMargins(32, 18, 32, 20)
         layout.setSpacing(18)
-        top = QHBoxLayout()
-        brand = QLabel("轻剪  <span style='color:#8891A3;font-size:13px'>AudioCut</span>")
+        self.header = QWidget()
+        self.header.setObjectName("windowHeader")
+        top = QHBoxLayout(self.header)
+        top.setContentsMargins(32, 24, 32, 0)
+        top.setSpacing(10)
+        self.setMenuWidget(self.header)
+        brand = self.brand = QLabel()
+        brand.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
         brand.setObjectName("appTitle")
         brand.setFont(QFont("Microsoft YaHei UI", 17, QFont.Weight.DemiBold))
         top.addWidget(brand)
         top.addStretch()
+        self.theme_button = self._button("", "moon", self.toggle_theme, "themeToggle")
+        self.theme_button.setFixedSize(40, 40)
+        self.theme_button.setCheckable(True)
+        top.addWidget(self.theme_button)
         self.open_button = self._button("打开音频", "open", self.choose_file)
         self.open_button.setToolTip("打开文件并自动播放 · Ctrl+O")
         top.addWidget(self.open_button)
         self.save_button = self._button("保存", "save", self.save, "primary")
-        self.save_button.setIcon(icon("save", "#FFFFFF"))
+        self.save_button.setIcon(icon("save", COLORS["on_accent"]))
         self.save_button.setToolTip("保存裁剪与淡入淡出效果 · Ctrl+S")
         top.addWidget(self.save_button)
-        layout.addLayout(top)
+        top.addSpacing(10)
+        self.minimize_button = self._button("", "minimize", self.showMinimized, "windowControl")
+        self.maximize_button = self._button("", "maximize", self.toggle_maximized, "windowControl")
+        self.close_button = self._button("", "close", self.close, "windowClose")
+        for button, label in ((self.minimize_button, "最小化"),
+                              (self.maximize_button, "最大化"), (self.close_button, "关闭")):
+            button.setFixedSize(32, 32)
+            button.setIconSize(QSize(16, 16))
+            button.setToolTip(label)
+            button.setAccessibleName(label)
+            top.addWidget(button)
+        # Keep window controls visible when the audio content scrolls at small sizes.
+        for surface in (self, self.header, body, scroll.viewport()):
+            surface.setMouseTracking(True)
+            surface.installEventFilter(self)
 
         row = QHBoxLayout()
         file_info = QVBoxLayout()
@@ -132,7 +162,7 @@ class MainWindow(QMainWindow):
         self.back_button.setToolTip("回到片段开头 · Home")
         self.back_button.setAccessibleName("回到片段开头")
         self.play_button = self._button("", "play", self.toggle_play, "playButton")
-        self.play_button.setIcon(icon("play", "#FFFFFF", 24))
+        self.play_button.setIcon(icon("play", COLORS["on_accent"], 24))
         self.play_button.setFixedSize(50, 50)
         self.play_button.setToolTip("播放 / 暂停 · 空格")
         self.play_button.setAccessibleName("播放或暂停")
@@ -147,7 +177,7 @@ class MainWindow(QMainWindow):
         self.play_hint.setObjectName("muted")
         transport.addWidget(self.play_hint)
         transport.addSpacing(18)
-        volume_icon = QLabel()
+        volume_icon = self.volume_icon = QLabel()
         volume_icon.setPixmap(icon("volume").pixmap(18, 18))
         transport.addWidget(volume_icon)
         self.volume = QSlider(Qt.Orientation.Horizontal)
@@ -199,6 +229,87 @@ class MainWindow(QMainWindow):
         footer.addWidget(shortcuts)
         layout.addLayout(footer)
 
+    def toggle_theme(self):
+        app = QApplication.instance()
+        apply_theme(app, not bool(app.property("dark_theme")))
+        self.refresh_theme_icons()
+        self.wave.update()
+
+    def refresh_theme_icons(self):
+        dark = bool(QApplication.instance().property("dark_theme"))
+        self.theme_button.setChecked(dark)
+        self.theme_button.setIcon(icon("sun" if dark else "moon"))
+        hint = "切换到浅色主题" if dark else "切换到深色主题"
+        self.theme_button.setToolTip(hint)
+        self.theme_button.setAccessibleName(hint)
+        self.brand.setText(f"轻剪  <span style='color:{COLORS['muted']};font-size:13px'>AudioCut</span>")
+        self.setWindowIcon(icon("music"))
+        self.open_button.setIcon(icon("open"))
+        self.back_button.setIcon(icon("back"))
+        self.save_button.setIcon(icon("save", COLORS["on_accent"]))
+        self.volume_icon.setPixmap(icon("volume").pixmap(18, 18))
+        self.minimize_button.setIcon(icon("minimize", size=16))
+        self.close_button.setIcon(icon("close", size=16))
+        self.refresh_window_controls()
+        self.playback_changed(self.player.playbackState())
+        self.refresh_controls()
+
+    def toggle_maximized(self):
+        self.showNormal() if self.isMaximized() else self.showMaximized()
+
+    def refresh_window_controls(self):
+        maximized = self.isMaximized()
+        self.maximize_button.setIcon(icon("restore" if maximized else "maximize", size=16))
+        label = "还原窗口" if maximized else "最大化"
+        self.maximize_button.setToolTip(label)
+        self.maximize_button.setAccessibleName(label)
+
+    def changeEvent(self, event):
+        super().changeEvent(event)
+        if event.type() == QEvent.Type.WindowStateChange and hasattr(self, "maximize_button"):
+            self.refresh_window_controls()
+
+    def eventFilter(self, watched, event):
+        if event.type() not in (QEvent.Type.MouseMove, QEvent.Type.MouseButtonPress,
+                                QEvent.Type.MouseButtonDblClick):
+            return super().eventFilter(watched, event)
+        point = self.mapFromGlobal(event.globalPosition().toPoint())
+        edges = Qt.Edge(0)
+        if not self.isMaximized() and not self.isFullScreen():
+            if point.x() < 6:
+                edges |= Qt.Edge.LeftEdge
+            elif point.x() >= self.width() - 6:
+                edges |= Qt.Edge.RightEdge
+            if point.y() < 6:
+                edges |= Qt.Edge.TopEdge
+            elif point.y() >= self.height() - 6:
+                edges |= Qt.Edge.BottomEdge
+        if event.type() == QEvent.Type.MouseMove:
+            if edges:
+                horizontal = edges & (Qt.Edge.LeftEdge | Qt.Edge.RightEdge)
+                vertical = edges & (Qt.Edge.TopEdge | Qt.Edge.BottomEdge)
+                if horizontal and vertical:
+                    cursor = Qt.CursorShape.SizeFDiagCursor if edges in (
+                        Qt.Edge.TopEdge | Qt.Edge.LeftEdge, Qt.Edge.BottomEdge | Qt.Edge.RightEdge,
+                    ) else Qt.CursorShape.SizeBDiagCursor
+                else:
+                    cursor = Qt.CursorShape.SizeHorCursor if horizontal else Qt.CursorShape.SizeVerCursor
+                watched.setCursor(cursor)
+            else:
+                watched.unsetCursor()
+        elif event.button() == Qt.MouseButton.LeftButton:
+            handle = self.windowHandle()
+            if edges and handle:
+                return handle.startSystemResize(edges)
+            # Interactive header children consume their own mouse presses.
+            if watched is self.header:
+                if event.type() == QEvent.Type.MouseButtonDblClick:
+                    self.toggle_maximized()
+                    return True
+                if handle:
+                    return handle.startSystemMove()
+        return super().eventFilter(watched, event)
+
     def _shortcuts(self):
         for key, callback in (("Ctrl+O", self.choose_file), ("Ctrl+S", self.save),
                               ("Ctrl+E", lambda: self.set_editing(not self.editing)),
@@ -236,6 +347,7 @@ class MainWindow(QMainWindow):
             return
         self.player.pause()
         self.pending_media = None
+        self.pending_playback = None
         self.wave_cancel.set()
         self.wave_cancel = threading.Event()
         self.source_id += 1
@@ -287,6 +399,12 @@ class MainWindow(QMainWindow):
                 self.preview_key = (self.source_id, self.revision)
                 self.set_busy(False, "试听已就绪，包含裁剪与淡入淡出")
                 self.set_media(result, True, self.pending_seek, self.pending_play)
+            elif kind == "playback":
+                key, preview, position, play = self.pending_playback
+                self.pending_playback = None
+                self.playback_cache[key] = result
+                self.set_busy(False, "兼容播放已就绪")
+                self._set_media(result, preview, position, play)
             elif kind == "export":
                 self.set_busy(False, "已保存：" + str(result))
                 if result.resolve() == self.info.path.resolve():
@@ -312,7 +430,7 @@ class MainWindow(QMainWindow):
         channels = {1: "单声道", 2: "立体声"}.get(info.channels, f"{info.channels} 声道")
         depth = f"  ·  {info.bit_depth} bit" if info.bit_depth else ""
         self.file_detail.setText(f"{info.original_path.suffix[1:].upper()}  ·  {info.sample_rate / 1000:g} kHz  ·  {channels}{depth}")
-        self.setWindowTitle(info.original_path.name + " — 轻剪 AudioCut")
+        self.setWindowTitle(info.original_path.name + " — 轻剪 AudioCut" + (" · 兼容播放" if self.compatible_audio else ""))
         self.editing = False
         self.sync_fields()
         self.wave.set_audio(info, [])
@@ -322,6 +440,28 @@ class MainWindow(QMainWindow):
         self.run_job("wave", waveform, info, 1200, self.wave_cancel)
 
     def set_media(self, path, preview, position, play):
+        self.pending_playback = None
+        if self.compatible_audio:
+            device_format = self.audio.device().preferredFormat()
+            codecs = {QAudioFormat.SampleFormat.UInt8: "pcm_u8", QAudioFormat.SampleFormat.Int16: "pcm_s16le",
+                      QAudioFormat.SampleFormat.Int32: "pcm_s32le", QAudioFormat.SampleFormat.Float: "pcm_f32le"}
+            rate, channels = device_format.sampleRate(), device_format.channelCount()
+            codec = codecs.get(device_format.sampleFormat(), "pcm_f32le")
+            path = Path(path)
+            key = (self.source_id, path.resolve(), rate, channels, codec)
+            if key in self.playback_cache:
+                path = self.playback_cache[key]
+            else:
+                self.player.stop()
+                self.pending_media = None
+                self.pending_playback = (key, preview, position, play)
+                destination = self.temp_dir / ("playback-" + uuid.uuid4().hex + ".wav")
+                self.set_busy(True, "正在准备兼容播放…")
+                self.run_job("playback", render_playback, path, destination, rate, channels, codec)
+                return
+        self._set_media(path, preview, position, play)
+
+    def _set_media(self, path, preview, position, play):
         self.player.stop()
         self.using_preview = preview
         self.pending_media = (position, play)
@@ -360,7 +500,7 @@ class MainWindow(QMainWindow):
         self.editor.setEnabled(loaded)
         self.editor.setVisible(self.editing)
         self.mode_button.setChecked(self.editing)
-        self.mode_button.setIcon(icon("scissors", "#FFFFFF" if self.editing else "#657086", 22))
+        self.mode_button.setIcon(icon("scissors", COLORS["on_accent"] if self.editing else COLORS["muted"], 22))
         mode_hint = "编辑模式 · 点击返回播放" if self.editing else "播放模式 · 点击进入编辑"
         self.mode_button.setToolTip(mode_hint + " · Ctrl+E")
         self.mode_button.setAccessibleDescription(mode_hint)
@@ -408,6 +548,7 @@ class MainWindow(QMainWindow):
         self.player.pause()
         self.pending_media = None
         self.edit = edit
+        self.pending_playback = None
         self.revision += 1
         self.preview_key = None
         if not self.dirty() and self.using_preview:
@@ -425,6 +566,10 @@ class MainWindow(QMainWindow):
 
     def toggle_play(self):
         if not self.info or self.busy:
+            return
+        if self.pending_playback is not None:
+            key, preview, position, _ = self.pending_playback
+            self.set_media(key[1], preview, position, True)
             return
         if self.pending_media is not None:
             position, play = self.pending_media
@@ -457,6 +602,9 @@ class MainWindow(QMainWindow):
         if self.dirty() and self.preview_key != (self.source_id, self.revision):
             self.prepare_preview(position - self.edit.start,
                                  self.player.playbackState() == QMediaPlayer.PlaybackState.PlayingState)
+        elif self.pending_playback is not None:
+            key, preview, _, play = self.pending_playback
+            self.pending_playback = (key, preview, position - (self.edit.start if preview else 0), play)
         else:
             offset = self.edit.start if self.using_preview else 0
             relative = position - offset
@@ -479,7 +627,7 @@ class MainWindow(QMainWindow):
 
     def playback_changed(self, state):
         playing = state == QMediaPlayer.PlaybackState.PlayingState
-        self.play_button.setIcon(icon("pause" if playing else "play", "#FFFFFF", 24))
+        self.play_button.setIcon(icon("pause" if playing else "play", COLORS["on_accent"], 24))
         self.play_button.setAccessibleName("暂停" if playing else "播放")
 
     def playback_error(self, error, message):
@@ -552,7 +700,7 @@ class MainWindow(QMainWindow):
         self.player.setSource(QUrl())
         self.timer.stop()
         self.executor.shutdown(wait=False)
-        for path in list(self.temp_dir.glob("preview-*.wav")) + list(self.temp_dir.glob("ncm-*")):
+        for path in list(self.temp_dir.glob("preview-*.wav")) + list(self.temp_dir.glob("ncm-*")) + list(self.temp_dir.glob("playback-*.wav")):
             path.unlink(missing_ok=True)
         self.temp_dir.rmdir()
         self.closed = True
@@ -560,13 +708,18 @@ class MainWindow(QMainWindow):
 
 
 def main():
+    arguments = sys.argv[1:]
+    compatible_audio = "--compatible-audio" in arguments
+    arguments = [arg for arg in arguments if arg != "--compatible-audio"]
+    if compatible_audio and sys.platform == "win32":
+        os.environ["QT_MEDIA_BACKEND"] = "windows"
     app = QApplication(sys.argv)
     app.setApplicationName("AudioCut")
     apply_theme(app)
-    window = MainWindow()
+    window = MainWindow(compatible_audio=compatible_audio)
     window.show()
-    if len(sys.argv) > 1:
-        QTimer.singleShot(0, lambda: window.open_path(Path(sys.argv[1])))
+    if arguments:
+        QTimer.singleShot(0, lambda: window.open_path(Path(arguments[0])))
     sys.exit(app.exec())
 
 

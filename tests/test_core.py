@@ -44,6 +44,31 @@ class AudioCoreTests(unittest.TestCase):
         self.assertEqual(core.normalize_format(".WAVE"), "wav")
         self.assertEqual(core.normalize_format("aif"), "aiff")
 
+    def test_compatible_pcm_matches_device_without_changing_source(self):
+        original = self.source.read_bytes()
+        output = self.target("compatible.wav")
+        core.render_playback(self.source, output, 96000, 2, "pcm_f32le")
+        info = core.probe(output)
+        self.assertEqual((info.sample_rate, info.channels, info.codec), (96000, 2, "pcm_f32le"))
+        self.assertAlmostEqual(info.duration, 3, places=4)
+        samples = array("f", core._run([core.resolve_tool("ffmpeg"), "-v", "error", "-i", str(output), "-f", "f32le", "-"]))
+        # FFmpeg's mono -> stereo pan law is -3 dB; verify both channels and no spikes.
+        expected = 0.5 / math.sqrt(2)
+        for sample in samples[1920:-1920]:
+            self.assertAlmostEqual(sample, expected, delta=0.0001)
+        self.assertEqual(original, self.source.read_bytes())
+
+    def test_compatible_pcm_failure_cleanup_and_existing_target_protection(self):
+        output = self.target("failed-compatible.wav")
+        with patch.object(core, "_run", side_effect=RuntimeError("failure")), patch.object(core, "probe", return_value=self.info):
+            with self.assertRaises(RuntimeError):
+                core.render_playback(self.source, output, 96000, 2, "pcm_f32le")
+        self.assertFalse(output.exists())
+        output.write_bytes(b"keep")
+        with self.assertRaises(FileExistsError):
+            core.render_playback(self.source, output, 96000, 2, "pcm_f32le")
+        self.assertEqual(output.read_bytes(), b"keep")
+
     def test_default_sine_and_normalized_log_exponential(self):
         self.assertEqual((core.Edit(0, 1).curve_in, core.Edit(0, 1).curve_out), ("sine_in", "sine_out"))
         for suffix, base in (("3", 3), ("141", 1.41)):
