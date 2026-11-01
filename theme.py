@@ -2,9 +2,10 @@
 
 from pathlib import Path
 
-from PySide6.QtCore import QByteArray, Qt
+from PySide6.QtCore import QByteArray, QEvent, QObject, Qt
 from PySide6.QtGui import QColor, QFont, QIcon, QPainter, QPalette, QPixmap
 from PySide6.QtSvg import QSvgRenderer
+from PySide6.QtWidgets import QPushButton, QToolButton
 
 
 LIGHT_COLORS = {
@@ -71,7 +72,6 @@ QPushButton, QToolButton {
 }
 QPushButton:hover, QToolButton:hover { background: @hover@; border-color: @hover_border@; }
 QPushButton:pressed, QToolButton:pressed { background: @pressed@; }
-QPushButton:focus, QToolButton:focus { border-color: @accent@; }
 QPushButton:disabled, QToolButton:disabled { color: @disabled_text@; background: @disabled_background@; border-color: @disabled_border@; }
 QPushButton[primary="true"], QPushButton#primary, QPushButton#saveButton, QPushButton#playButton {
     background: @accent@; color: @on_accent@; border: 1px solid @accent@;
@@ -88,13 +88,16 @@ QPushButton#playButton { border-radius: 25px; padding: 0; min-height: 48px; max-
 QPushButton#modeToggle, QPushButton#themeToggle { padding: 0; border-radius: 10px; min-height: 38px; }
 QPushButton#modeToggle:checked { background: @accent@; border-color: @accent@; }
 QPushButton#modeToggle:checked:hover { background: @accent_hover@; border-color: @accent_hover@; }
-QPushButton#modeToggle:focus { border: 2px solid @text@; }
 QPushButton#modeToggle:disabled { background: @disabled_border@; border-color: @button_border@; }
 QPushButton#windowControl, QPushButton#windowClose { background: transparent; border: none; padding: 0; min-height: 32px; border-radius: 7px; }
-QPushButton#windowControl:hover { background: @hover@; }
-QPushButton#windowClose:hover { background: @accent_soft@; border: 1px solid @danger@; }
+QPushButton#windowControl:hover, QPushButton#windowClose:hover { background: @hover@; }
 QPushButton#textButton { padding: 2px 4px; border: none; background: transparent; color: @accent@; font-size: 12px; }
 QPushButton#textButton:hover { color: @link_hover@; }
+QPushButton[keyboardFocus="true"]:focus, QToolButton[keyboardFocus="true"]:focus,
+QPushButton#primary[keyboardFocus="true"]:focus, QPushButton#saveButton[keyboardFocus="true"]:focus,
+QPushButton#playButton[keyboardFocus="true"]:focus, QPushButton#modeToggle[keyboardFocus="true"]:focus,
+QPushButton#windowControl[keyboardFocus="true"]:focus, QPushButton#windowClose[keyboardFocus="true"]:focus,
+QPushButton#textButton[keyboardFocus="true"]:focus { border: 1px solid @text@; }
 QLineEdit, QComboBox, QDoubleSpinBox, QSpinBox {
     background: @surface@; border: 1px solid @input_border@; border-radius: 8px;
     padding: 9px 11px; min-height: 18px; selection-background-color: @accent@; selection-color: @on_accent@;
@@ -127,7 +130,37 @@ QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0; }
 """.replace("@ASSETS@", Path(__file__).with_name("assets").as_posix())
 
 
+class _ButtonFocusStyle(QObject):
+    """Show button focus for keyboard navigation without changing focus or activation."""
+
+    def eventFilter(self, button, event):
+        kind = event.type()
+        if kind not in (QEvent.Type.FocusIn, QEvent.Type.FocusOut,
+                        QEvent.Type.MouseButtonPress, QEvent.Type.KeyPress):
+            return False
+        if not isinstance(button, (QPushButton, QToolButton)):
+            return False
+        if kind == QEvent.Type.FocusIn:
+            visible = event.reason() in (Qt.FocusReason.TabFocusReason, Qt.FocusReason.BacktabFocusReason,
+                                         Qt.FocusReason.ShortcutFocusReason)
+        elif kind == QEvent.Type.KeyPress:
+            if event.key() not in (Qt.Key.Key_Space, Qt.Key.Key_Return, Qt.Key.Key_Enter):
+                return False
+            visible = True
+        else:
+            visible = False
+        if button.property("keyboardFocus") != visible:
+            button.setProperty("keyboardFocus", visible)
+            button.style().unpolish(button)
+            button.style().polish(button)
+            button.update()
+        return False
+
+
 def apply_theme(app, dark=False):
+    if not hasattr(app, "_button_focus_style"):
+        app._button_focus_style = _ButtonFocusStyle(app)
+        app.installEventFilter(app._button_focus_style)
     if app.style().objectName().lower() != "fusion":
         app.setStyle("Fusion")
     COLORS.update(DARK_COLORS if dark else LIGHT_COLORS)

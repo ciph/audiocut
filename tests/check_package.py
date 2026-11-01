@@ -2,6 +2,7 @@
 import ctypes
 from ctypes import wintypes
 import os
+import json
 from pathlib import Path
 import subprocess
 import sys
@@ -34,7 +35,9 @@ startup.dwFlags |= subprocess.STARTF_USESHOWWINDOW
 startup.wShowWindow = 0
 env = os.environ.copy()
 env.pop("QT_QPA_PLATFORM", None)
-options = ["--compatible-audio"] if "--compatible-audio" in sys.argv[2:] else []
+options = [flag for flag in ("--compatible-audio", "--diagnose-audio", "--buffer-test") if flag in sys.argv[2:]]
+log_directory = Path(os.environ["LOCALAPPDATA"]) / "AudioCut" / "audio-diagnostics"
+logs_before = set(log_directory.glob("*.jsonl"))
 process = subprocess.Popen([str(executable), *options, str(fixture)],
                            startupinfo=startup, creationflags=subprocess.CREATE_NO_WINDOW, env=env)
 user32 = ctypes.windll.user32
@@ -89,6 +92,17 @@ try:
         time.sleep(0.2)
     assert process.wait(timeout=1) == 0
     print("Packaged EXE closed cleanly with exit code 0.")
+    if "--diagnose-audio" in options or "--buffer-test" in options:
+        matching = []
+        for path in set(log_directory.glob("*.jsonl")) - logs_before:
+            records = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
+            if any(fixture.name in record.get("path", "") for record in records):
+                matching.append(records)
+        assert len(matching) == 1, "Expected one diagnostic log for this fixture"
+        records = matching[0]
+        assert any("clock anchor" in r.get("message", "") and "native_process_time" in r for r in records), "Native Qt log capture missing"
+        assert records[-1]["event"] == "session_end" and records[-1]["dropped_records"] == 0
+        print("Packaged EXE captured native Qt timestamps and flushed the diagnostic log.")
 finally:
     if process.poll() is None:
         process.terminate()

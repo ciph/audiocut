@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import argparse
 import logging
 import os
 import queue
@@ -26,10 +27,11 @@ from widgets import SaveDialog, Waveform, time_text
 
 
 class MainWindow(QMainWindow):
-    def __init__(self, compatible_audio=False):
+    def __init__(self, compatible_audio=False, diagnostics=None):
         super().__init__()
         self.setWindowFlag(Qt.WindowType.FramelessWindowHint)
         self.compatible_audio = compatible_audio
+        self.diagnostics = diagnostics
         self.playback_cache = {}
         self.pending_playback = None
         self.setWindowTitle("轻剪 AudioCut")
@@ -71,6 +73,12 @@ class MainWindow(QMainWindow):
         self.timer.start(40)
         self._shortcuts()
         self.refresh_controls()
+        if diagnostics:
+            diagnostics.attach_player(self, self.player, self.audio)
+
+    def trace_playback(self, action, **fields):
+        if self.diagnostics:
+            self.diagnostics.record("transport", action=action, position_ms=self.player.position(), **fields)
 
     def _button(self, text, name, callback, object_name=""):
         button = QPushButton(icon(name), text)
@@ -133,11 +141,11 @@ class MainWindow(QMainWindow):
         row = QHBoxLayout()
         file_info = QVBoxLayout()
         file_info.setSpacing(6)
-        self.filename = QLabel("让声音，刚刚好。")
+        self.filename = QLabel()
         self.filename.setObjectName("fileTitle")
         self.filename.setTextFormat(Qt.TextFormat.PlainText)
         self.filename.setMinimumWidth(0)
-        self.file_detail = QLabel("打开即播放，需要时轻松剪辑。")
+        self.file_detail = QLabel()
         self.file_detail.setObjectName("muted")
         file_info.addWidget(self.filename)
         file_info.addWidget(self.file_detail)
@@ -345,6 +353,7 @@ class MainWindow(QMainWindow):
     def open_path(self, path, confirm=True):
         if self.busy or (confirm and not self.confirm_discard()):
             return
+        self.trace_playback("open", path=str(path))
         self.player.pause()
         self.pending_media = None
         self.pending_playback = None
@@ -462,6 +471,7 @@ class MainWindow(QMainWindow):
         self._set_media(path, preview, position, play)
 
     def _set_media(self, path, preview, position, play):
+        self.trace_playback("replace_source", preview=preview, target_ms=round(position * 1000), autoplay=play)
         self.player.stop()
         self.using_preview = preview
         self.pending_media = (position, play)
@@ -545,6 +555,7 @@ class MainWindow(QMainWindow):
         if edit == self.edit:
             return
         edit.validate(self.info.duration)
+        self.trace_playback("edit")
         self.player.pause()
         self.pending_media = None
         self.edit = edit
@@ -567,6 +578,7 @@ class MainWindow(QMainWindow):
     def toggle_play(self):
         if not self.info or self.busy:
             return
+        self.trace_playback("toggle_play")
         if self.pending_playback is not None:
             key, preview, position, _ = self.pending_playback
             self.set_media(key[1], preview, position, True)
@@ -588,6 +600,7 @@ class MainWindow(QMainWindow):
             self.player.play()
 
     def prepare_preview(self, relative_position, autoplay):
+        self.trace_playback("prepare_preview")
         self.player.pause()
         self.pending_seek = relative_position
         self.pending_play = autoplay
@@ -599,6 +612,7 @@ class MainWindow(QMainWindow):
         if not self.info or self.busy:
             return
         position = min(self.edit.end, max(self.edit.start, position))
+        self.trace_playback("seek", target_ms=round(position * 1000))
         if self.dirty() and self.preview_key != (self.source_id, self.revision):
             self.prepare_preview(position - self.edit.start,
                                  self.player.playbackState() == QMediaPlayer.PlaybackState.PlayingState)
@@ -708,20 +722,46 @@ class MainWindow(QMainWindow):
 
 
 def main():
-    arguments = sys.argv[1:]
-    compatible_audio = "--compatible-audio" in arguments
-    arguments = [arg for arg in arguments if arg != "--compatible-audio"]
-    if compatible_audio and sys.platform == "win32":
+    parser = argparse.ArgumentParser(description="轻剪 AudioCut")
+    parser.add_argument("--compatible-audio", action="store_true")
+    parser.add_argument("--diagnose-audio", action="store_true")
+    parser.add_argument("--buffer-test", action="store_true")
+    parser.add_argument("path", nargs="?")
+    arguments = parser.parse_args()
+    if arguments.buffer_test and arguments.compatible_audio:
+        parser.error("缓冲对照不使用兼容播放模式。")
+    if arguments.compatible_audio and sys.platform == "win32":
         os.environ["QT_MEDIA_BACKEND"] = "windows"
+    if arguments.diagnose_audio or arguments.buffer_test:
+        # Qt caches this setting when logging initializes; set it before QApplication.
+        os.environ["QT_FORCE_STDERR_LOGGING"] = "1"
     app = QApplication(sys.argv)
     app.setApplicationName("AudioCut")
     apply_theme(app)
-    window = MainWindow(compatible_audio=compatible_audio)
-    window.show()
-    if arguments:
-        QTimer.singleShot(0, lambda: window.open_path(Path(arguments[0])))
-    sys.exit(app.exec())
+    diagnostics = None
+    if arguments.diagnose_audio or arguments.buffer_test:
+        from audio_diagnostics import AudioDiagnostics
+        try:
+            diagnostics = AudioDiagnostics(mode="buffer_test" if arguments.buffer_test else "player")
+        except OSError as exc:
+            QMessageBox.warning(None, "无法开启诊断", "诊断初始化失败：" + str(exc))
+            return 1
+    try:
+        if arguments.buffer_test:
+            from buffer_test import BufferTestWindow
+            window = BufferTestWindow(diagnostics)
+            if arguments.path:
+                QTimer.singleShot(0, lambda: window.load_path(Path(arguments.path)))
+        else:
+            window = MainWindow(compatible_audio=arguments.compatible_audio, diagnostics=diagnostics)
+            if arguments.path:
+                QTimer.singleShot(0, lambda: window.open_path(Path(arguments.path)))
+        window.show()
+        return app.exec()
+    finally:
+        if diagnostics:
+            diagnostics.close()
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

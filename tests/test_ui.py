@@ -17,7 +17,7 @@ from PySide6.QtCore import QPoint, QPointF, QRectF, Qt
 from PySide6.QtGui import QContextMenuEvent, QFontDatabase, QPainterPathStroker, QPalette
 from PySide6.QtMultimedia import QMediaPlayer
 from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QApplication, QMessageBox
+from PySide6.QtWidgets import QApplication, QFileDialog, QMessageBox
 
 from app import MainWindow
 from core import CURVES, Edit, gain_at, probe, resolve_tool
@@ -221,6 +221,74 @@ class WindowTest(unittest.TestCase):
         finally:
             apply_theme(self.qt)
             self.window.refresh_theme_icons()
+
+    def test_mouse_click_leaves_no_button_focus_border(self):
+        self.load()
+        self.window.player.pause()
+        self.wait_for(lambda: self.window.jobs == 0)
+        try:
+            for dark in (True, False):
+                QTest.mouseClick(self.window.theme_button, Qt.MouseButton.LeftButton)
+                self.assertEqual(bool(self.qt.property("dark_theme")), dark)
+                for button in (self.window.theme_button, self.window.mode_button, self.window.back_button):
+                    if button is not self.window.theme_button:
+                        QTest.mouseClick(button, Qt.MouseButton.LeftButton)
+                    QTest.mouseMove(self.window.header, QPoint(240, 10))
+                    QTest.qWait(20)
+                    self.assertTrue(button.hasFocus())
+                    state = button.isChecked()
+                    clicked = button.grab().toImage()
+                    button.clearFocus()
+                    QTest.qWait(10)
+                    neutral = button.grab().toImage()
+                    # Mouse focus must not add a persistent border; checked state stays intact.
+                    self.assertEqual(clicked.pixelColor(clicked.width() // 2, 0),
+                                     neutral.pixelColor(neutral.width() // 2, 0), button.objectName())
+                    self.assertEqual(button.isChecked(), state)
+                    if button is self.window.theme_button:
+                        evidence = Path(__file__).resolve().parents[1] / "evidence"
+                        evidence.mkdir(exist_ok=True)
+                        clicked.save(str(evidence / f"focus-mouse-{'dark' if dark else 'light'}.png"))
+                self.assertEqual(self.window.mode_button.isChecked(), self.window.editing)
+        finally:
+            apply_theme(self.qt)
+            self.window.refresh_theme_icons()
+
+    def test_keyboard_focus_and_dialog_activation_still_work(self):
+        self.window.theme_button.setFocus()
+        QTest.keyClick(self.window.theme_button, Qt.Key.Key_Tab)
+        self.assertTrue(self.window.open_button.hasFocus())
+        self.assertTrue(self.window.open_button.property("keyboardFocus"))
+        QTest.keyClick(self.window.open_button, Qt.Key.Key_Backtab)
+        self.assertTrue(self.window.theme_button.hasFocus())
+        self.assertTrue(self.window.theme_button.property("keyboardFocus"))
+        focused = self.window.theme_button.grab().toImage()
+        self.window.theme_button.clearFocus()
+        neutral = self.window.theme_button.grab().toImage()
+        self.assertNotEqual(focused.pixelColor(focused.width() // 2, 0),
+                            neutral.pixelColor(neutral.width() // 2, 0))
+        dialog = SaveDialog(probe(self.source), self.window)
+        try:
+            dialog.show()
+            dialog.activateWindow()
+            QTest.qWait(30)
+            dialog.directory_edit.setFocus()
+            QTest.keyClick(dialog.directory_edit, Qt.Key.Key_Tab)
+            self.assertTrue(dialog.browse_button.hasFocus())
+            self.assertTrue(dialog.browse_button.property("keyboardFocus"))
+            with patch.object(QFileDialog, "getExistingDirectory", return_value="") as browse:
+                QTest.keyClick(dialog.browse_button, Qt.Key.Key_Space)
+                browse.assert_called_once()
+                self.assertTrue(dialog.browse_button.property("keyboardFocus"))
+                QTest.mouseClick(dialog.browse_button, Qt.MouseButton.LeftButton)
+                self.assertEqual(browse.call_count, 2)
+                self.assertFalse(dialog.browse_button.property("keyboardFocus"))
+            dialog.name_edit.setFocus()
+            self.assertTrue(dialog.save_button.isDefault())
+            QTest.keyClick(dialog.name_edit, Qt.Key.Key_Return)
+            self.assertEqual(dialog.result(), SaveDialog.DialogCode.Accepted)
+        finally:
+            dialog.close()
 
     def test_frameless_window_controls_drag_and_resize(self):
         window = self.window
