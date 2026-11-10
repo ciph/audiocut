@@ -13,8 +13,11 @@ import wave
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 root = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(root / "tests"))
 executable = Path(sys.argv[1]).resolve() if len(sys.argv) > 1 else root / "release" / "AudioCut" / "AudioCut.exe"
-fixture = root / "tests" / ("package-silence-" + uuid.uuid4().hex + ".wav")
+fixtures = root / "artifacts" / "tmp"
+fixtures.mkdir(parents=True, exist_ok=True)
+fixture = fixtures / ("package-silence-" + uuid.uuid4().hex + ".wav")
 with wave.open(str(fixture), "wb") as audio:
     audio.setparams((1, 2, 48000, 0, "NONE", "not compressed"))
     audio.writeframes(bytes(48000 * 2 * 2))

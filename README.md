@@ -4,7 +4,7 @@ Windows 单文件音频播放器与剪辑工具。打开文件自动播放；切
 
 ## 启动
 
-使用已打包版本时，双击 `release\AudioCut\AudioCut.exe`，或 `启动轻剪.cmd`（优先启动 release，兼容旧 dist 目录）。源码仓库不包含 EXE 和 FFmpeg，首次运行源码请按下方“开发与验证”准备环境。也可把一个音频文件拖到窗口或 EXE 上打开。
+使用已打包版本时，双击 `release\AudioCut\AudioCut.exe`，或 `启动轻剪.cmd`（优先启动 release，否则使用源码环境）。源码仓库不包含 EXE 和 FFmpeg，首次运行源码请按下方“开发与验证”准备环境。也可把一个音频文件拖到窗口或 EXE 上打开。
 
 运行需要 `ffmpeg` 和 `ffprobe` 可从 PATH 访问；迁移到其他电脑时需安装 FFmpeg，或把两个程序放在 AudioCut.exe 同级的 `bin` 目录。移动打包版本时请保留整个 `release\AudioCut` 文件夹，包括 `_internal`。
 
@@ -25,21 +25,21 @@ Windows 单文件音频播放器与剪辑工具。打开文件自动播放；切
 
 ### 播放兼容模式
 
-如果同一文件在其他播放器正常、在轻剪中有杂音，可使用 `AudioCut-compatible.cmd` 启动，或运行 `AudioCut.exe --compatible-audio`。任务栏中的窗口标题会显示“兼容播放”。该模式在 Windows 上使用原生播放后端，并先将原音和编辑试听转换成与输出设备匹配的采样率、声道数及 PCM 样本格式；转换在后台进行，完成后自动播放。通过先解码成 PCM，兼容模式也可播放原生后端无法直接打开的 OGG、Opus、AIFF 等音频。打开文件、首次试听编辑效果会多一次准备过程，并占用临时磁盘空间（96 kHz 双声道浮点 PCM 约 46 MB/分钟）。同一播放文件重复使用缓存，正常退出后清理。
+如果同一文件在其他播放器正常、在轻剪中有杂音，可使用 `scripts/AudioCut-compatible.cmd` 启动，或运行 `AudioCut.exe --compatible-audio`。任务栏中的窗口标题会显示“兼容播放”。该模式在 Windows 上使用原生播放后端，并先将原音和编辑试听转换成与输出设备匹配的采样率、声道数及 PCM 样本格式；转换在后台进行，完成后自动播放。通过先解码成 PCM，兼容模式也可播放原生后端无法直接打开的 OGG、Opus、AIFF 等音频。打开文件、首次试听编辑效果会多一次准备过程，并占用临时磁盘空间（96 kHz 双声道浮点 PCM 约 46 MB/分钟）。同一播放文件重复使用缓存，正常退出后清理。
 
 兼容模式只改变监听，源文件、导出格式、采样率及声道数仍按原有规则处理。切换声卡或系统采样率后，请重新打开音频。这个模式用于排查播放输出兼容性，是否消除特定设备的杂音需要实际试听确认；普通启动方式保持原有行为。
 
 ### 爆点诊断与缓冲对照
 
-用 `AudioCut-diagnostics.cmd`（或 `AudioCut.exe --diagnose-audio`）启动原播放器，打开有问题的音频。听到爆点立即按 **Ctrl+M**，日志记录标记时间和播放位置；跳转、暂停、编辑和换源分别记录，便于排除操作造成的正常中断。可与 `--compatible-audio` 同用。日志还包含 Qt 音频渲染器原始消息、设备及格式、媒体状态、每秒播放快照和 UI 定时器延迟。媒体 `bufferProgress` 不是声卡输出缓冲余量；UI 延迟也不直接证明音频线程缺数据。
+用 `scripts/AudioCut-diagnostics.cmd`（或 `AudioCut.exe --diagnose-audio`）启动原播放器，打开有问题的音频。听到爆点立即按 **Ctrl+M**，日志记录标记时间和播放位置；跳转、暂停、编辑和换源分别记录，便于排除操作造成的正常中断。可与 `--compatible-audio` 同用。日志还包含 Qt 音频渲染器原始消息、设备及格式、媒体状态、每秒播放快照和 UI 定时器延迟。媒体 `bufferProgress` 不是声卡输出缓冲余量；UI 延迟也不直接证明音频线程缺数据。
 
-用 `AudioCut-buffer-test.cmd`（或 `AudioCut.exe --buffer-test`）打开缓冲对照窗口，选择同一文件，依次点击 A / B / C。三组分别请求 **110 / 250 / 500 ms**，均从前 45 秒起点播放，音量固定 0.8；先在后台解码一次，然后复用同一份 PCM、采样格式和输出设备。界面及日志显示启动后的实际缓冲大小；设备可能不接受请求值，比较时应以实际值为准。日志记录 PCM SHA-256、每次补充间隔、采样缓冲余量、见底观测和结束原因。Ctrl+M 或“标记”记录本轮听感时间。切换输出设备后应关闭并重新打开对照窗口。
+用 `scripts/AudioCut-buffer-test.cmd`（或 `AudioCut.exe --buffer-test`）打开缓冲对照窗口，选择同一文件，依次点击 A / B / C。三组分别请求 **110 / 250 / 500 ms**，均从前 45 秒起点播放，音量固定 0.8；先在后台解码一次，然后复用同一份 PCM、采样格式和输出设备。界面及日志显示启动后的实际缓冲大小；设备可能不接受请求值，比较时应以实际值为准。日志记录 PCM SHA-256、每次补充间隔、采样缓冲余量、见底观测和结束原因。Ctrl+M 或“标记”记录本轮听感时间。切换输出设备后应关闭并重新打开对照窗口。
 
 该对照使用 `QAudioSink` 和固定 10 ms 补充请求；正式播放器仍由 `QMediaPlayer` 内部调度，未改变其默认缓冲。它能验证受控补充延迟下的缓冲容错，不能独自确认正式播放器的爆点根因。短暂 Idle 状态可能在 UI 恢复前已经过去，状态观测不是完整的硬件欠载计数；见底次数也不等于可闻爆点次数。`native_period_frames=-1` 表示底层周期不可查询。Qt 消息包含原生发出时间 `native_process_time`，通过 `AudioCut clock anchor` 与会话时间对齐；外层 `t_ms` 为后台采集到达时间，两者可能有差异。Ctrl+M 包含人为反应延迟。
 
 日志只保存在本机 `%LOCALAPPDATA%\AudioCut\audio-diagnostics`，窗口会显示实际路径。内容包括文件路径、设备信息和事件，不保存音频样本，不上传；单次会话最多保留 3 个约 5 MB 的轮转文件。Qt 消息经 64 KiB 原生管道由后台线程采集，不使用音频线程上的 Python 消息回调；应用事件使用有界队列，另一个线程写盘，丢弃条数记录在日志中。仅启用必要的音频渲染日志；大量额外调试日志仍可能填满原生管道，影响时序。普通启动不开启这些日志。分享日志前请检查其中的本地路径。
 
-开发者可运行 `python tests/run_buffer_comparison.py --rounds 2`：先记录原播放器，再用合成音频静音比较三档缓冲，交替正序 / 逆序，分别无注入和每秒注入 200 ms 的 UI/补充线程延迟；输出位于 `build/buffer-comparison`。这是受控故障注入，不能用其结果代替实际听感确认。
+开发者可运行 `python scripts/run_buffer_comparison.py --rounds 2`：先记录原播放器，再用合成音频静音比较三档缓冲，交替正序 / 逆序，分别无注入和每秒注入 200 ms 的 UI/补充线程延迟；输出位于 `artifacts/buffer-comparison`。这是受控故障注入，不能用其结果代替实际听感确认。
 
 | 快捷键 | 操作 |
 | --- | --- |
@@ -72,6 +72,26 @@ Windows 单文件音频播放器与剪辑工具。打开文件自动播放；切
 
 ## 开发与验证
 
+### 工程目录
+
+```text
+audio-cut/
+├─ app.py、core.py、widgets.py 等   应用入口、音频处理与界面源码
+├─ assets/                        图标与界面资源
+├─ tests/                         自动化测试与测试夹具
+├─ scripts/                       兼容/诊断启动入口、打包检查和桌面验证工具
+├─ docs/VERIFICATION.md            验证记录与已知限制
+├─ artifacts/                     本地诊断证据、截图、测试输出（不提交）
+├─ build/                         打包中间文件（按需生成，可清理）
+├─ release/AudioCut/               当前可运行版本（不提交）
+├─ AudioCut.spec                  PyInstaller 打包配置
+└─ 启动轻剪.cmd                    日常启动入口
+```
+
+源码和资源保留在固定位置；辅助模式从 `scripts/` 启动。截图统一输出到 `artifacts/screenshots/`，缓冲实验默认输出到 `artifacts/buffer-comparison/`。历史排查记录存放在 `artifacts/diagnostics/`，清理清单在 `artifacts/maintenance/`；这些目录只保留本地文件。
+
+`build/` 仅存放可重建的打包中间文件，清理前将需要保留的实验结果归档到 `artifacts/`。当前发布目录统一为 `release/AudioCut/`；旧的 `dist/`、`release-next/` 和历史安装包备份不作为日常入口。保留当前发布目录及 Python 环境即可继续运行或开发。
+
 需要 Python 3.10+、FFmpeg，以及本目录 `requirements.txt` 的依赖。
 
 ```powershell
@@ -85,4 +105,4 @@ python -m venv .\.venv
 
 打包：先运行 `.\.venv\Scripts\python.exe -m pip install PyInstaller==6.22.3`，再在本目录运行 `.\.venv\Scripts\python.exe -m PyInstaller --noconfirm --distpath release AudioCut.spec`。打包前关闭该输出目录中的运行实例。
 
-生成的打包目录、缓存、测试日志、截图和音频文件均不提交到源码仓库。验证方法与已知限制见 [VERIFICATION.md](VERIFICATION.md)。
+生成的打包目录、缓存、测试日志、截图和音频文件均不提交到源码仓库。验证方法与已知限制见 [验证记录](docs/VERIFICATION.md)。

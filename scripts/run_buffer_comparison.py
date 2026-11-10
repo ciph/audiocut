@@ -22,7 +22,8 @@ from core import _run, resolve_tool
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--output", type=Path, default=Path("build/buffer-comparison"))
+    parser.add_argument("--output", type=Path,
+                        default=Path(__file__).resolve().parents[1] / "artifacts" / "buffer-comparison")
     parser.add_argument("--rounds", type=int, default=2)
     args = parser.parse_args()
     if not 1 <= args.rounds <= 10:

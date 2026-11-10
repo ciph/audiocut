@@ -30,8 +30,8 @@ else:
     raise RuntimeError("Audio did not load: " + window.status.text())
 assert window.player.playbackState() == QMediaPlayer.PlaybackState.PlayingState
 window.player.pause()
-evidence = Path(__file__).resolve().parents[1] / "evidence"
-evidence.mkdir(exist_ok=True)
+evidence = Path(__file__).resolve().parents[1] / "artifacts" / "screenshots"
+evidence.mkdir(parents=True, exist_ok=True)
 window.grab().save(str(evidence / "desktop-player.png"))
 preview_geometry = window.wave.geometry()
 transport_geometry = window.play_button.geometry()

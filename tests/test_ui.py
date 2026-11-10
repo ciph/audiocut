@@ -132,8 +132,8 @@ class WindowTest(unittest.TestCase):
         self.window.mode_button.click()
         self.wait_for(lambda: self.window.jobs == 0)
 
-        evidence = Path(__file__).resolve().parents[1] / "evidence"
-        evidence.mkdir(exist_ok=True)
+        evidence = Path(__file__).resolve().parents[1] / "artifacts" / "screenshots"
+        evidence.mkdir(parents=True, exist_ok=True)
         self.window.grab().save(str(evidence / "editor.png"))
         dialog = SaveDialog(self.window.info, self.window)
         destination, format_key, keep = dialog.result_options()
@@ -183,8 +183,8 @@ class WindowTest(unittest.TestCase):
         edit, source = self.window.edit, self.window.player.source()
         volume = self.window.audio.volume()
         geometry = self.window.wave.geometry()
-        evidence = Path(__file__).resolve().parents[1] / "evidence"
-        evidence.mkdir(exist_ok=True)
+        evidence = Path(__file__).resolve().parents[1] / "artifacts" / "screenshots"
+        evidence.mkdir(parents=True, exist_ok=True)
         try:
             for dark, colors in ((True, DARK_COLORS), (False, LIGHT_COLORS)):
                 position = self.window.player.position()
@@ -246,8 +246,8 @@ class WindowTest(unittest.TestCase):
                                      neutral.pixelColor(neutral.width() // 2, 0), button.objectName())
                     self.assertEqual(button.isChecked(), state)
                     if button is self.window.theme_button:
-                        evidence = Path(__file__).resolve().parents[1] / "evidence"
-                        evidence.mkdir(exist_ok=True)
+                        evidence = Path(__file__).resolve().parents[1] / "artifacts" / "screenshots"
+                        evidence.mkdir(parents=True, exist_ok=True)
                         clicked.save(str(evidence / f"focus-mouse-{'dark' if dark else 'light'}.png"))
                 self.assertEqual(self.window.mode_button.isChecked(), self.window.editing)
         finally:
@@ -380,8 +380,8 @@ class WindowTest(unittest.TestCase):
 
     def test_empty_error_and_reset(self):
         self.assertFalse(self.window.play_button.isEnabled())
-        evidence = Path(__file__).resolve().parents[1] / "evidence"
-        evidence.mkdir(exist_ok=True)
+        evidence = Path(__file__).resolve().parents[1] / "artifacts" / "screenshots"
+        evidence.mkdir(parents=True, exist_ok=True)
         self.window.grab().save(str(evidence / "empty.png"))
         with patch.object(QMessageBox, "warning") as warning:
             self.window.open_path(self.root / "missing.wav")

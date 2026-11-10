@@ -1,10 +1,18 @@
 # 验证记录
 
+## 2026-11-10 工程目录整理
+
+清理范围仅为 `audio-cut/`。旧 `dist/`、四份旧版安装包、Qt 对照环境及下载缓存、打包中间文件、派生测试音频和 Python 缓存已删除；保留当前 `release/AudioCut/`，清理前后 EXE 的 SHA-256 相同。73 份诊断记录、历史脚本、验证日志及截图经逐文件 SHA-256 校验后归档到 `artifacts/`，本次清理净回收 2,121,320,291 字节（约 1.98 GiB）。清单保存在本地 `artifacts/maintenance/cleanup-20261110.json`。
+
+验证文档迁入 `docs/`，兼容/诊断启动脚本与三个开发验证工具迁入 `scripts/`，测试与夹具保留在 `tests/`；源码模块和资源路径不变。截图统一输出到 `artifacts/screenshots/`，缓冲实验默认输出到 `artifacts/buffer-comparison/`，打包检查临时夹具放在 `artifacts/tmp/` 并在退出时清除。历史记录中的原始日志内容保持不变，所引用的派生音频已清理；旧临时脚本仅作排查归档，不作为当前启动入口。
+
+整理后验证：15 个 Python 文件语法检查通过；20 项现有界面回归全部通过（136.820 s），覆盖打开、播放、编辑、保存和新的截图输出目录。迁移后的 `scripts/check_package.py` 使用 NCM 静音夹具通过打包程序启动、加载、退出及原生诊断日志收尾检查；三个辅助 CMD 的 release / 源码 / Python 回退路径均核对存在，缓冲对照脚本的 CLI 帮助正常。应用运行代码未改动，沿用现有打包版本；本轮未重跑底层音频处理全套测试或进行主观音质检查。
+
 ## 2026-11-01 声音断续继续定位
 
 用户进一步明确：偶发的是声音短促断续，走带线仍正常前进。因此此前标记附近的 seek 相关性不能被当作误触跳转的证据，本轮未修改波形拖动或正式播放缓冲。
 
-读取诊断会话最新尾段：一次恢复播放至下次 seek 之间约 74.221 s，无 `ui_timer_delay`、`renderer_idle_candidate` 或播放器错误；记录到 7 组 `Change rendering time`，对应音频输出均为 `ActiveState`。Qt 的时序校正日志不是可闻断续计数，且这段没有新的 Ctrl+M 标记，不能据此确认或排除输出中断。随后两次 Idle 候选分别距最近 seek 约 33.508 / 35.070 ms。原始尾段已保留到忽略目录 `build/audio-continuity-20261101/player-session-tail.jsonl`。
+读取诊断会话最新尾段：一次恢复播放至下次 seek 之间约 74.221 s，无 `ui_timer_delay`、`renderer_idle_candidate` 或播放器错误；记录到 7 组 `Change rendering time`，对应音频输出均为 `ActiveState`。Qt 的时序校正日志不是可闻断续计数，且这段没有新的 Ctrl+M 标记，不能据此确认或排除输出中断。随后两次 Idle 候选分别距最近 seek 约 33.508 / 35.070 ms。原始尾段已保留到忽略目录 `artifacts/diagnostics/audio-continuity-20261101/player-session-tail.jsonl`。
 
 实际音乐缓冲对照已完成：Audient EVO4，96 kHz / 双声道 / Float，三个请求值均被实际接受，各轮 PCM SHA-256 相同、音量 0.8。用户反馈“三组暂时都正常”，日志无爆点标记、缓冲见底或饥饿状态观测，无日志丢弃。110 ms 组一次完整播放 45 s，另一次约 13.28 s，最小采样余量均为 54.687 ms；250 ms 组播放约 4.27 s 后切换，最小余量 194.687 ms；500 ms 三轮约 4.02 / 1.73 / 33.47 s，最低采样余量 430 ms。三组试听时长不同且未复现异常，不能声称已完成等时长稳定性比较，也不支持“加大缓冲已修复”的结论。
 
@@ -12,7 +20,7 @@
 
 对真实 NCM 内的 MP3（44.1 kHz 双声道）进行离线解码验证，覆盖前 60 s（包括此前两个标记位置）：Qt QAudioDecoder 与独立 FFmpeg 分别输出 44.1 kHz / 96 kHz Float，对齐样本数完全相同。RMS 差异分别约 2.015×10⁻⁸ / 2.417×10⁻⁸，最大绝对差异约 2.980×10⁻⁷ / 3.576×10⁻⁷；无非有限样本或误差超过 10⁻⁵ 的样本。各解码块时间戳衔接误差不到 1 μs。此检查未发现明显样本异常，仅验证离线解码，不覆盖实时供数、设备格式转换或最终硬件输出。API 边界参见 [Qt QAudioDecoder 文档](https://doc.qt.io/qt-6.12/qaudiodecoder.html)。
 
-本轮没有更改正式播放逻辑或缓冲参数；临时音频、日志快照、样本校验脚本及结果仅在忽略目录 `build/playback-path-comparison-20261101/`（脚本位于 `build/`）保存。当前结论是本轮未复现、缓冲容量不足尚无实测支持；下一步如继续复现，应在原文件连续播放时标记，以核对实时供数、44.1→96 kHz 输出转换与设备链路，不能把这些方向当作已确认根因。
+本轮没有更改正式播放逻辑或缓冲参数；日志快照、样本校验脚本及结果仅在忽略目录 `artifacts/diagnostics/playback-path-comparison-20261101/`（历史脚本归档在 `artifacts/diagnostics/session-scripts/`）保存。当前结论是本轮未复现、缓冲容量不足尚无实测支持；下一步如继续复现，应在原文件连续播放时标记，以核对实时供数、44.1→96 kHz 输出转换与设备链路，不能把这些方向当作已确认根因。
 
 ## 2026-10-31 播放诊断与缓冲对照
 
@@ -28,13 +36,13 @@
 | 每秒注入 200 ms 补充延迟：两轮见底观测 | 6 / 6 | 0 / 0 | 0 / 0 |
 | 注入时最小采样余量 | 0 ms | 40–50 ms | 290–300 ms |
 
-日志确认原播放器采用 Qt FFmpeg 后端，内部缓冲参数为 22 / 64 / 110 ms。原播放器启动后约 0.1 s 出现一次 `renderer_idle_candidate`，随后 5 次人为阻塞 UI 200 ms 期间，没有新增同类候选记录；不能把这一启动事件解释为用户的随机爆点。Qt 状态通知可能在 UI 阻塞期间合并，所记录的是回调时状态，不是完整硬件欠载计数；对照记录中的见底观测也不是可闻爆点数。测试无日志丢弃。最终采用原生 stderr 管道采集，避开 Python 消息回调与原生线程停止的潜在死锁，并记录 Qt 原生时间及会话时钟锚点。原始结果及日志保留在忽略目录 `build/buffer-comparison-native-20261031/`。
+日志确认原播放器采用 Qt FFmpeg 后端，内部缓冲参数为 22 / 64 / 110 ms。原播放器启动后约 0.1 s 出现一次 `renderer_idle_candidate`，随后 5 次人为阻塞 UI 200 ms 期间，没有新增同类候选记录；不能把这一启动事件解释为用户的随机爆点。Qt 状态通知可能在 UI 阻塞期间合并，所记录的是回调时状态，不是完整硬件欠载计数；对照记录中的见底观测也不是可闻爆点数。测试无日志丢弃。最终采用原生 stderr 管道采集，避开 Python 消息回调与原生线程停止的潜在死锁，并记录 Qt 原生时间及会话时钟锚点。原始结果及日志保留在忽略目录 `artifacts/diagnostics/buffer-comparison-native-20261031/`。
 
 结论边界：较大缓冲在受控供数延迟下有更多余量，但尚未确认原播放器在实际音乐爆点时是否欠载。未录制硬件回环、未主观试听输出；需要在诊断模式下试听并按 Ctrl+M 标记，再对齐 Qt 渲染器日志。对照窗口的 QAudioSink 补充方式与正式 QMediaPlayer 调度不同，不能把 110 ms 测试组当作原播放器的等价复现。
 
 同日晚实际音乐标记分析：两次 Ctrl+M 的播放位置为 25.627 s / 48.066 s，分别在最近一次 seek 后 322.799 ms / 300.595 ms。第二次附近的 Idle 候选在 seek 后 12.961 ms 出现；第一处最近的候选在标记前 4.703 s。两处前 5 s 至后 1 s 均未记录 UI 定时器延迟事件或播放器错误。整段会话中的 12 次 Idle 候选均位于最近一次跳转后约 12–443 ms，存在明显的跳转干扰因素，不能归因为连续播放缓冲耗尽。
 
-对同一首本地 NCM 做独立静音复测：从 0 连续播放至 60 s，无 Idle 候选；随后每隔 400 ms 跳转，分别到 25.327 s / 47.766 s 各 8 次，共出现 2 个 Idle 候选；最后一次跳转后继续播放 5 s，无新增候选。此结果验证状态异常与跳转相关，仍不能证明可闻爆点因果；需区分用户反复试听与意外重复跳转。日志快照和统计在忽略目录 `build/marked-audio-analysis-20261031/`，不发布音频或用户路径。本轮未调整播放缓冲或跳转行为。
+对同一首本地 NCM 做独立静音复测：从 0 连续播放至 60 s，无 Idle 候选；随后每隔 400 ms 跳转，分别到 25.327 s / 47.766 s 各 8 次，共出现 2 个 Idle 候选；最后一次跳转后继续播放 5 s，无新增候选。此结果验证状态异常与跳转相关，仍不能证明可闻爆点因果；需区分用户反复试听与意外重复跳转。日志快照和统计在忽略目录 `artifacts/diagnostics/marked-audio-analysis-20261031/`，不发布音频或用户路径。本轮未调整播放缓冲或跳转行为。
 
 验证日期：2026-10-19。环境：Windows 10、Python 3.14.5、PySide6 6.12.0、FFmpeg 8.1.1、PyCryptodome 3.23.0。
 
@@ -57,11 +65,11 @@
 
 ```powershell
 .\.venv\Scripts\python.exe -m unittest discover -s tests -v
-.\.venv\Scripts\python.exe tests\check_package.py
-.\.venv\Scripts\python.exe tests\check_package.py release\AudioCut\AudioCut.exe --ncm
-.\.venv\Scripts\python.exe tests\check_package.py release\AudioCut\AudioCut.exe --compatible-audio --ncm
+.\.venv\Scripts\python.exe scripts\check_package.py
+.\.venv\Scripts\python.exe scripts\check_package.py release\AudioCut\AudioCut.exe --ncm
+.\.venv\Scripts\python.exe scripts\check_package.py release\AudioCut\AudioCut.exe --compatible-audio --ncm
 # 可选：使用自己的音频检查原生界面（静音，不修改源文件）
-.\.venv\Scripts\python.exe tests\capture_desktop.py "C:\Audio\sample.wav"
+.\.venv\Scripts\python.exe scripts\capture_desktop.py "C:\Audio\sample.wav"
 ```
 
 打包检查需要先生成 `release/AudioCut/AudioCut.exe`。测试使用临时合成音频；日志、截图和二进制生成物只保留在本地，不纳入源码仓库。
@@ -74,4 +82,4 @@ NCM 使用按公开容器结构生成的测试样本，尚未使用用户真实 
 
 杂音排查中，用 44.1 / 48 / 96 kHz 合成 MP3、FLAC 对比 Qt 解码与独立 FFmpeg 解码，重叠采样的均方根误差不超过 5.2×10⁻⁹。此结果仅覆盖合成样本的解码，不证明声卡最终输出无噪音。用户最初反馈普通 MP3 / FLAC 等文件也有噪音，兼容模式仍有间歇性噪音；后续补充其他播放器似乎也有轻微杂音，可能与硬件有关，尚未确认。因此当前兼容模式不能视为该问题的修复，根因尚未确定。直接使用原生后端不能播放部分格式，因此兼容模式先统一转换 PCM；普通启动方式仍使用原有后端。
 
-追加同文件试听对照：从当前已解包 MP3 的 20 秒位置截取 45 秒，降低增益至 0.5，转换为 48 kHz / 双声道 / 16 bit WAV。A 使用 Qt 6.12 FFmpeg 后端，B 使用 Python 标准库 winsound 调用 Windows PlaySound，均播放同一 WAV。用户反馈 A、B 都有噪音；这不能证明 Qt 是根因，也不能排除两者共用的源数据、转换或系统输出路径。测试 WAV 峰值为 -5.51 dBFS，未发生整数 PCM 削波；后续反馈各播放器似乎都有轻微杂音，软件层排查已暂停；硬件、驱动或音源原因均未确认。试听脚本与音频仅存放在忽略的 build/audio-diagnostics 目录，不发布用户音频。
+追加同文件试听对照：从当前已解包 MP3 的 20 秒位置截取 45 秒，降低增益至 0.5，转换为 48 kHz / 双声道 / 16 bit WAV。A 使用 Qt 6.12 FFmpeg 后端，B 使用 Python 标准库 winsound 调用 Windows PlaySound，均播放同一 WAV。用户反馈 A、B 都有噪音；这不能证明 Qt 是根因，也不能排除两者共用的源数据、转换或系统输出路径。当时测试 WAV 峰值为 -5.51 dBFS，未发生整数 PCM 削波；后续反馈各播放器似乎都有轻微杂音，软件层排查已暂停；硬件、驱动或音源原因均未确认。试听脚本及结果归档在忽略的 artifacts/diagnostics/audio-diagnostics 目录；派生音频已在 2026-11-10 清理，不发布用户音频。
